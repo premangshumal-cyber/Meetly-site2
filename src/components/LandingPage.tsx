@@ -38,19 +38,12 @@ export default function LandingPage({ onStartMeeting, onJoinMeeting, initialRoom
   const [roomCode, setRoomCode] = useState(initialRoomCode || '');
   const [requireApproval, setRequireApproval] = useState(false);
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
-  const [copied, setCopied] = useState(false);
   const [showLanguage, setShowLanguage] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('English');
 
   // Mock call buttons states on the visual showcase
   const [mockMic, setMockMic] = useState(true);
   const [mockCam, setMockCam] = useState(true);
-
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText('7room-6390');
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const handleCreate = () => {
     if (!name.trim()) return;
@@ -269,7 +262,7 @@ export default function LandingPage({ onStartMeeting, onJoinMeeting, initialRoom
                           type="text" 
                           value={roomCode}
                           onChange={(e) => setRoomCode(e.target.value)}
-                          placeholder="e.g. 7room-6390"
+                          placeholder="Paste the host's room code"
                           className="w-full bg-[#181a1f] border border-border-custom rounded-xl py-3 pl-10 pr-3 text-sm text-white placeholder-text-faint focus:outline-none focus:border-accent transition-colors font-mono"
                         />
                       </div>
@@ -295,14 +288,11 @@ export default function LandingPage({ onStartMeeting, onJoinMeeting, initialRoom
               {/* Fast code preview */}
               <div className="text-center pt-1">
                 <div className="inline-flex items-center gap-1.5 text-xs text-text-dim">
-                  Share a link like:
-                  <code className="px-2 py-1 rounded bg-[#0c0d11] border border-border-custom text-accent font-mono text-[11px] font-semibold flex items-center gap-1.5">
-                    7room-6390
-                    <button onClick={handleCopyCode} className="text-text-faint hover:text-white transition-colors cursor-pointer">
-                      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    </button>
+                  Example room link:
+                  <code className="px-2 py-1 rounded bg-[#0c0d11] border border-border-custom text-accent font-mono text-[11px] font-semibold">
+                    ?room=a8f33dc09c16
                   </code>
-                  with others.
+                  (a real link appears when you create a meeting).
                 </div>
               </div>
             </div>
@@ -426,7 +416,7 @@ export default function LandingPage({ onStartMeeting, onJoinMeeting, initialRoom
             <div>
               <h4 className="text-xs font-bold text-white">Your privacy is our priority</h4>
               <p className="text-[11px] text-text-faint leading-relaxed mt-0.5">
-                No data is stored on our servers. Your conversations stay private.
+                Calls use WebRTC peer connections. Optional AI processing shares submitted transcript text with an AI provider.
               </p>
             </div>
           </div>
