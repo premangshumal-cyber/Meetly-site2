@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NODE_ENV=production PORT=3100 node dist/server.cjs > /tmp/meetly-server.log 2>&1 &
+          NODE_ENV=production PORT=3100 node build/server.cjs > /tmp/meetly-server.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; cat /tmp/meetly-server.log' EXIT
           for retry in {1..25}; do
