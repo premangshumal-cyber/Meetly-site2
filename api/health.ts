@@ -1,4 +1,4 @@
-import { json } from './_shared';
+import { json } from './_shared.js';
 export function GET() {
   return json({ status: 'ok', aiEnabled: Boolean(process.env.GEMINI_API_KEY) });
 }
