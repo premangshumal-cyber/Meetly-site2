@@ -1,0 +1,56 @@
+name: Meetly quality gates
+
+on:
+  push:
+    branches:
+      - main
+      - repair/meetly-site2-operational
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configure Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check TypeScript
+        run: npm run lint
+
+      - name: Build frontend and backend
+        run: npm run build
+
+      - name: Smoke test health and block server-side code execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_ENV=production PORT=3100 node dist/server.cjs > /tmp/meetly-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; cat /tmp/meetly-server.log' EXIT
+          for retry in {1..25}; do
+            if curl --fail --silent http://localhost:3100/api/health > /tmp/health.json; then break; fi
+            sleep 1
+          done
+          grep -q '"status":"ok"' /tmp/health.json
+          result=$(curl --silent --output /tmp/compile.json --write-out '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -X POST http://localhost:3100/api/compile \
+            --data '{"language":"javascript","code":"return process.env;"}')
+          test "$result" = "501"
+          grep -q 'disabled for security' /tmp/compile.json
+          test -f dist/index.html
