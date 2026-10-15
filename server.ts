@@ -11,7 +11,8 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const AI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 // Initialize Gemini SDK with User-Agent header for telemetry
 const apiKey = process.env.GEMINI_API_KEY;
@@ -30,88 +31,33 @@ if (apiKey) {
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '64kb' }));
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   // API Route: Check system health
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", aiEnabled: !!apiKey });
   });
 
-  // API Route: Run simulated code compiler for Coding Interview Mode
-  app.post("/api/compile", (req, res) => {
-    const { code, language } = req.body;
-    if (!code) {
-      return res.status(400).json({ error: "Code is required" });
-    }
-
-    try {
-      if (language === "javascript" || language === "typescript") {
-        // Safe simulation of JS code execution in a sandbox context
-        // Capture standard output
-        const logs: string[] = [];
-        const originalLog = console.log;
-        console.log = (...args) => {
-          logs.push(args.map(a => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" "));
-        };
-
-        try {
-          // Standard JS execution
-          const result = new Function(code)();
-          console.log = originalLog;
-          
-          let output = logs.join("\n");
-          if (result !== undefined) {
-            output += `\n[Return value]: ${typeof result === "object" ? JSON.stringify(result) : result}`;
-          }
-          res.json({ output: output || "Execution completed successfully with no output logs." });
-        } catch (err: any) {
-          console.log = originalLog;
-          res.json({ error: err?.message || String(err) });
-        }
-      } else if (language === "python") {
-        // Python output simulator
-        let simulatedOutput = "Simulated Python 3.10 Execution:\n";
-        if (code.includes("print")) {
-          const match = code.match(/print\((['"])(.*?)\1\)/g);
-          if (match) {
-            match.forEach((m: string) => {
-              const content = m.replace(/print\((['"])/, "").replace(/(['"])\)/, "");
-              simulatedOutput += content + "\n";
-            });
-          } else {
-            simulatedOutput += "Hello World from Python!\n";
-          }
-        } else {
-          simulatedOutput += "Code executed successfully with no output.";
-        }
-        res.json({ output: simulatedOutput });
-      } else {
-        res.json({ output: `Simulated compiler execution successful for ${language}!` });
-      }
-    } catch (e: any) {
-      res.status(500).json({ error: e?.message || "Internal compiler error" });
-    }
+  // Never execute untrusted code on the application server.
+  // JavaScript snippets run in a restricted browser iframe instead.
+  app.post('/api/compile', (_req, res) => {
+    res.status(501).json({ error: 'Server-side code execution is disabled for security. Run JavaScript in the browser-based sandbox instead.' });
   });
 
   // API Route: AI Meeting Assistant (Live Summary, Actions, Timeline, Decisions, Tasks, Questions)
   app.post("/api/ai/meeting", async (req, res) => {
     if (!ai) {
-      return res.json({
-        summary: "AI Assistant is currently in sandbox offline mode. Ensure GEMINI_API_KEY is defined in Settings > Secrets.",
-        actionItems: ["Review previous project deliverables", "Schedule next alignment syncing session"],
-        keyDecisions: ["Agreed to build collaborative custom whiteboard widgets", "Agreed to use peer-to-peer WebRTC mesh routing"],
-        questions: ["What is the estimated completion date?", "How does the classroom breakout manager route peer signals?"],
-        tasks: ["Prem to complete interactive presentation drawing canvas", "Develop connection health bitrate graphing panel"],
-        timeline: [
-          { timestamp: "00:05", title: "Meeting Started", description: "Participants joined the room and set profiles." },
-          { timestamp: "00:15", title: "Feature Brainstorming", description: "Discussed interactive laser pointer cursors and smart classroom controls." }
-        ]
-      });
+      return res.status(503).json({ error: 'AI features are unavailable. Configure GEMINI_API_KEY on the server to enable them.' });
     }
 
     const { transcriptLines, userPrompt } = req.body;
-    const formattedTranscript = transcriptLines && transcriptLines.length > 0
-      ? transcriptLines.map((l: any) => `[${l.time}] ${l.sender}: ${l.text}`).join("\n")
+    const formattedTranscript = Array.isArray(transcriptLines) && transcriptLines.length > 0
+      ? transcriptLines.slice(-150).map((l: any) => `[${String(l?.time || "").slice(0, 24)}] ${String(l?.sender || "").slice(0, 80)}: ${String(l?.text || "").slice(0, 2000)}`).join("\n")
       : "No chat history or verbal transcripts logged yet.";
 
     const prompt = `
@@ -144,7 +90,7 @@ async function startServer() {
 
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: AI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -159,21 +105,19 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("Gemini meeting API error:", err);
-      res.status(500).json({ error: err?.message || "Error calling Gemini API" });
+      res.status(502).json({ error: "AI service is temporarily unavailable. Please try again." });
     }
   });
 
   // API Route: AI Ask Chat (Ask questions about meeting)
   app.post("/api/ai/chat", async (req, res) => {
     if (!ai) {
-      return res.json({
-        answer: "I am running in local-assist mode. Let me know if you want me to help with your agenda!"
-      });
+      return res.status(503).json({ error: 'AI chat is unavailable until GEMINI_API_KEY is configured.' });
     }
 
     const { transcriptLines, message } = req.body;
-    const formattedTranscript = transcriptLines && transcriptLines.length > 0
-      ? transcriptLines.map((l: any) => `[${l.time}] ${l.sender}: ${l.text}`).join("\n")
+    const formattedTranscript = Array.isArray(transcriptLines) && transcriptLines.length > 0
+      ? transcriptLines.slice(-150).map((l: any) => `[${String(l?.time || "").slice(0, 24)}] ${String(l?.sender || "").slice(0, 80)}: ${String(l?.text || "").slice(0, 2000)}`).join("\n")
       : "No transcript history logged yet.";
 
     const prompt = `
@@ -191,35 +135,21 @@ async function startServer() {
 
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: AI_MODEL,
         contents: prompt,
       });
 
       res.json({ answer: response.text });
     } catch (err: any) {
       console.error("Gemini Chat API error:", err);
-      res.status(500).json({ error: err?.message || "Error calling Gemini API" });
+      res.status(502).json({ error: "AI service is temporarily unavailable. Please try again." });
     }
   });
 
   // API Route: AI Generate Quiz
   app.post("/api/ai/quiz", async (req, res) => {
     if (!ai) {
-      return res.json({
-        title: "WebRTC & Networking Quiz",
-        questions: [
-          {
-            question: "What does WebRTC stand for?",
-            options: ["Web Real-Time Communication", "Web Routing Traffic Controller", "Web Remote Terminal Connection", "Web Resource Transmission Client"],
-            answerIndex: 0
-          },
-          {
-            question: "Which WebRTC API is responsible for exchanging data directly between peers?",
-            options: ["RTCDataChannel", "RTCPeerConnection", "MediaStream", "RTCSignalingChannel"],
-            answerIndex: 0
-          }
-        ]
-      });
+      return res.status(503).json({ error: 'AI quiz generation is unavailable until GEMINI_API_KEY is configured.' });
     }
 
     const { topic } = req.body;
@@ -240,7 +170,7 @@ async function startServer() {
 
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: AI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -254,7 +184,7 @@ async function startServer() {
         throw new Error("No response text from Gemini");
       }
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Error generating quiz" });
+      res.status(502).json({ error: "AI quiz generation failed. Please try again." });
     }
   });
 
