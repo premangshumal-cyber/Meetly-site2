@@ -39,6 +39,15 @@ export default function App() {
   const peerInstanceRef = useRef<Peer | null>(null);
   const connectionsMapRef = useRef<Map<string, any>>(new Map()); // peerId -> connection
   const callsMapRef = useRef<Map<string, any>>(new Map()); // peerId -> call
+  // PeerJS event callbacks outlive individual React renders. Keep live state in refs.
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const myIdRef = useRef('');
+  const participantsRef = useRef<Participant[]>([]);
+  const micOnRef = useRef(true);
+  const requireApprovalRef = useRef(false);
+  const allowedPeersRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => { participantsRef.current = participants; }, [participants]);
 
   // Parse room code from query URL on startup
   useEffect(() => {
@@ -64,9 +73,11 @@ export default function App() {
     setName(userName);
     setIsHost(true);
     setRequireApproval(approvalNeeded);
+    requireApprovalRef.current = approvalNeeded;
     
-    // Generate random 4 digit code
-    const randomCode = String(1000 + Math.floor(Math.random() * 8999));
+    // Unpredictable 12-character room ID reduces room guessing and collisions.
+    const randomBytes = crypto.getRandomValues(new Uint8Array(6));
+    const randomCode = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
     setRoomCode(randomCode);
     updateUrlRoomCode(randomCode);
     
@@ -93,6 +104,8 @@ export default function App() {
 
   // Main join room orchestration (starts PeerJS WebRTC connections)
   const handleJoinCall = (stream: MediaStream | null, micActive: boolean, camActive: boolean, level: 'none' | 'soft' | 'strong') => {
+    localStreamRef.current = stream;
+    micOnRef.current = micActive;
     setLocalStream(stream);
     setMicOn(micActive);
     setCamOn(camActive);
@@ -110,6 +123,7 @@ export default function App() {
   // Initialize Host connection
   const initializeHostPeer = () => {
     const hostPeerId = `meetly-${roomCode}-host`;
+    myIdRef.current = hostPeerId;
     setMyId(hostPeerId);
 
     const p = new Peer(hostPeerId, { debug: 1 });
@@ -143,6 +157,7 @@ export default function App() {
     peerInstanceRef.current = p;
 
     p.on('open', (id) => {
+      myIdRef.current = id;
       setMyId(id);
       setScreen('waiting');
       
@@ -150,6 +165,7 @@ export default function App() {
       const hostId = `meetly-${roomCode}-host`;
       const conn = p.connect(hostId, { reliable: true });
       connectionsMapRef.current.set(hostId, conn);
+      allowedPeersRef.current = new Set([hostId]);
 
       conn.on('open', () => {
         conn.send({ type: 'join-request', name: name, id: id });
@@ -163,6 +179,11 @@ export default function App() {
             alert('The host denied your request to join.');
             handleLeaveCall();
           } else if (data.type === 'admitted') {
+            if (Array.isArray(data.roster)) {
+              allowedPeersRef.current = new Set([hostId, ...data.roster
+                .filter((entry: any) => typeof entry?.id === 'string')
+                .map((entry: any) => entry.id)]);
+            }
             setScreen('call');
             appendSystemMessage('You joined the meeting!');
             
@@ -185,6 +206,18 @@ export default function App() {
       });
     });
 
+    p.on('connection', (conn) => {
+      // Only admit mesh connections from members listed by the room host.
+      if (!allowedPeersRef.current.has(conn.peer)) {
+        conn.on('open', () => conn.close());
+        return;
+      }
+      connectionsMapRef.current.set(conn.peer, conn);
+      conn.on('open', () => conn.send({ type: 'hello', name }));
+      conn.on('data', (data: any) => routeIncomingMessage(conn.peer, data));
+      conn.on('close', () => removeParticipant(conn.peer));
+    });
+
     p.on('call', (call) => {
       answerIncomingCall(call);
     });
@@ -200,7 +233,7 @@ export default function App() {
 
   // Connect to another peer in fanned-out WebRTC mesh
   const connectToPeerInMesh = (peerId: string, peerName: string) => {
-    if (peerId === myId || connectionsMapRef.current.has(peerId)) return;
+    if (peerId === myIdRef.current || connectionsMapRef.current.has(peerId)) return;
 
     const p = peerInstanceRef.current;
     if (!p) return;
@@ -227,9 +260,9 @@ export default function App() {
   // Ring peer for media streaming
   const initiateVideoCallToPeer = (peerId: string, peerName: string) => {
     const p = peerInstanceRef.current;
-    if (!p || !localStream) return;
+    if (!p) return;
 
-    const call = p.call(peerId, localStream);
+    const call = p.call(peerId, localStreamRef.current || new MediaStream());
     callsMapRef.current.set(peerId, call);
 
     call.on('stream', (remoteStream) => {
@@ -250,8 +283,13 @@ export default function App() {
 
   // Answer incoming video streaming ring
   const answerIncomingCall = (call: any) => {
-    if (!localStream) return;
-    call.answer(localStream);
+    // A waiting guest must not be able to bypass the host's admission decision.
+    if (!connectionsMapRef.current.has(call.peer) ||
+        (!isHost && !allowedPeersRef.current.has(call.peer))) {
+      call.close();
+      return;
+    }
+    call.answer(localStreamRef.current || new MediaStream());
     callsMapRef.current.set(call.peer, call);
 
     call.on('stream', (remoteStream: MediaStream) => {
@@ -274,7 +312,7 @@ export default function App() {
   const handleIncomingHostDataConnection = (conn: any) => {
     conn.on('data', (data: any) => {
       if (data && data.type === 'join-request') {
-        if (requireApproval) {
+        if (requireApprovalRef.current) {
           // Put in waiting list
           setPendingAdmissions(prev => [...prev, { id: conn.peer, name: data.name, conn }]);
           conn.send({ type: 'waiting' });
@@ -282,7 +320,8 @@ export default function App() {
           // Auto admit
           admitPendingGuest(conn.peer, data.name, conn);
         }
-      } else {
+      } else if (connectionsMapRef.current.get(conn.peer) === conn) {
+        // Ignore all non-admission data from guests still in the waiting room.
         routeIncomingMessage(conn.peer, data);
       }
     });
@@ -298,8 +337,8 @@ export default function App() {
 
     // Broadcast current roster list to let guest connect to mesh
     const roster = [
-      { id: myId, name },
-      ...participants.map(p => ({ id: p.id, name: p.name }))
+      { id: myIdRef.current, name },
+      ...participantsRef.current.map(p => ({ id: p.id, name: p.name }))
     ];
 
     conn.send({ type: 'admitted', roster });
@@ -321,8 +360,8 @@ export default function App() {
 
   const broadcastRosterUpdate = () => {
     const roster = [
-      { id: myId, name },
-      ...participants.map(p => ({ id: p.id, name: p.name }))
+      { id: myIdRef.current, name },
+      ...participantsRef.current.map(p => ({ id: p.id, name: p.name }))
     ];
 
     connectionsMapRef.current.forEach(conn => {
@@ -394,23 +433,29 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('remote-poll-sync', { detail: { poll: data.poll } }));
         break;
       case 'mute-request':
-        // Force mute local microphone
-        if (micOn) {
-          handleToggleMic();
+        if (!isHost && fromPeerId === `meetly-${roomCode}-host` && micOnRef.current) {
+          micOnRef.current = false;
+          setMicOn(false);
+          localStreamRef.current?.getAudioTracks().forEach(track => { track.enabled = false; });
+          broadcastToAll({ type: 'mic', on: false });
           alert('The meeting host muted your microphone.');
         }
         break;
       case 'remove-request':
-        alert('You were removed from the meeting by the host.');
-        handleLeaveCall();
+        if (!isHost && fromPeerId === `meetly-${roomCode}-host`) {
+          alert('You were removed from the meeting by the host.');
+          handleLeaveCall();
+        }
         break;
       case 'bye':
         removeParticipant(fromPeerId);
         break;
       case 'roster-update':
         // Guest connects to other peers
-        if (data.roster) {
+        if (!isHost && fromPeerId === `meetly-${roomCode}-host` && Array.isArray(data.roster)) {
           data.roster.forEach((p: { id: string; name: string }) => {
+            if (typeof p.id !== 'string' || typeof p.name !== 'string') return;
+            allowedPeersRef.current.add(p.id);
             if (p.id !== myId && !connectionsMapRef.current.has(p.id)) {
               connectToPeerInMesh(p.id, p.name);
             }
@@ -484,6 +529,11 @@ export default function App() {
 
     // Reset state
     setParticipants([]);
+    participantsRef.current = [];
+    myIdRef.current = '';
+    micOnRef.current = true;
+    allowedPeersRef.current.clear();
+    localStreamRef.current = null;
     setMessages([]);
     setPendingAdmissions([]);
     setWbStrokes([]);
@@ -545,7 +595,8 @@ export default function App() {
   };
 
   const handleToggleMic = () => {
-    const nextVal = !micOn;
+    const nextVal = !micOnRef.current;
+    micOnRef.current = nextVal;
     setMicOn(nextVal);
     if (localStream) {
       localStream.getAudioTracks().forEach(track => {
@@ -600,7 +651,8 @@ export default function App() {
   };
 
   const handleToggleWaitingRoom = (enabled: boolean) => {
-    setRequireApproval(prev => !prev);
+    requireApprovalRef.current = enabled;
+    setRequireApproval(enabled);
   };
 
   return (
