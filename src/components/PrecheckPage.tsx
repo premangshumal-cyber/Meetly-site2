@@ -32,12 +32,19 @@ export default function PrecheckPage({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const handedOffRef = useRef(false);
 
   // Request camera and microphone stream
   useEffect(() => {
     let activeStream: MediaStream | null = null;
+    let cancelled = false;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setPermissionError('Camera and microphone require HTTPS or localhost and browser permission.');
+      return;
+    }
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then((s) => {
+        if (cancelled) { s.getTracks().forEach(track => track.stop()); return; }
         setStream(s);
         activeStream = s;
         if (videoRef.current) {
@@ -50,7 +57,8 @@ export default function PrecheckPage({
       });
 
     return () => {
-      if (activeStream) {
+      cancelled = true;
+      if (activeStream && !handedOffRef.current) {
         activeStream.getTracks().forEach(track => track.stop());
       }
     };
@@ -75,6 +83,8 @@ export default function PrecheckPage({
   }, [camOn, stream]);
 
   const handleJoin = () => {
+    // Transfer media ownership to App; the preview unmount must not stop the call.
+    handedOffRef.current = true;
     onJoinCall(stream, micOn, camOn, blurLevel);
   };
 
