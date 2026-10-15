@@ -1,4 +1,4 @@
-import { generate, handleFailure, json, readInput, safeTranscript } from '../_shared';
+import { generate, handleFailure, json, readInput, safeTranscript } from '../_shared.js';
 
 export async function POST(request: Request) {
   try {
