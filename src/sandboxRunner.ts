@@ -48,7 +48,7 @@ export function runJavaScriptSafely(source: string, timeoutMs = 4000): Promise<s
       "  self.postMessage({ output: 'Execution error: ' + String(error?.message || error) });",
       " }",
       "};"
-    ].join('\\n');
+    ].join('\n');
 
     // Escape less-than signs to keep pasted code from closing script tags.
     const safelyEmbeddedCode = JSON.stringify(source).replace(/</g, '\\u003c');
@@ -75,7 +75,7 @@ export function runJavaScriptSafely(source: string, timeoutMs = 4000): Promise<s
     `;
     iframe.srcdoc =
       '<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\' blob:; worker-src blob:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'"><script>' +
-      embeddedScript + '<\\/script>';
+      embeddedScript + '</script>';
     document.body.appendChild(iframe);
   });
 }
