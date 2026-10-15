@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Brain, 
   Sparkles, 
@@ -64,7 +64,8 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
       });
 
       if (!response.ok) {
-        throw new Error('Server error generating AI notes');
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.error || 'Unable to generate notes.');
       }
 
       const data = await response.json();
@@ -76,13 +77,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
     }
   };
 
-  // Run initial call when component loads or when transcript lines grow
-  useEffect(() => {
-    if (transcriptLines.length > 0 && !aiData) {
-      handleGenerateSummary();
-    }
-  }, [transcriptLines.length]);
-
+  // AI processing is opt-in: never transmit conversation text automatically.
   const handleSendChat = async () => {
     if (!chatInp.trim() || chatLoading) return;
     
@@ -101,13 +96,14 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
       });
 
       if (!response.ok) {
-        throw new Error('AI Chat response failed');
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.error || 'AI Chat response failed');
       }
 
       const data = await response.json();
       setChatMessages(prev => [...prev, { sender: 'ai', text: data.answer, time: timeStr }]);
-    } catch (err) {
-      setChatMessages(prev => [...prev, { sender: 'ai', text: 'I encountered an error trying to connect to Gemini. Please try again.', time: timeStr }]);
+    } catch (err: any) {
+      setChatMessages(prev => [...prev, { sender: 'ai', text: String(err?.message || 'AI assistant is unavailable.'), time: timeStr }]);
     } finally {
       setChatLoading(false);
     }
@@ -133,7 +129,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
               AI Co-pilot Space
               <Sparkles className="w-3 h-3 text-accent" />
             </h3>
-            <p className="text-[10px] text-text-faint font-medium">Gemini 3.5 Live Assistant</p>
+            <p className="text-[10px] text-text-faint font-medium">Optional AI assistant</p>
           </div>
         </div>
 
@@ -144,9 +140,13 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
           className="px-2.5 py-1 text-[10px] font-bold text-accent bg-accent/5 hover:bg-accent/15 border border-accent/20 rounded-md transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50"
         >
           {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-          Refresh AI Analysis
+          Generate AI analysis
         </button>
       </div>
+
+      <p className="px-4 py-2 text-[10px] text-text-faint border-b border-border-custom">
+        AI actions are optional. When you request them, available transcript and chat text is sent to the configured AI provider.
+      </p>
 
       {/* Selector Tabs */}
       <div className="grid grid-cols-3 bg-panel-2 border-b border-border-custom text-center shrink-0 p-1">
@@ -191,8 +191,8 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
               <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-xl text-xs flex gap-2.5">
                 <AlertTriangle className="w-4.5 h-4.5 shrink-0" />
                 <div>
-                  <h5 className="font-bold">AI Assistant Sandbox Mode</h5>
-                  <p className="text-[11px] opacity-80 mt-0.5">{error}. Simulated offline summaries are generated for presentation check.</p>
+                  <h5 className="font-bold">AI is unavailable</h5>
+                  <p className="text-[11px] opacity-80 mt-0.5">{error}</p>
                 </div>
               </div>
             )}
@@ -207,7 +207,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
                     Live Summary
                   </h4>
                   <p className="text-xs text-text-dim leading-relaxed bg-panel-2/50 border border-border-custom/40 p-3 rounded-xl">
-                    {aiData?.summary || "No summarization compiled yet. As discussions occur on screen, verbal transcripts will populate a comprehensive executive summary."}
+                    {aiData?.summary || "No AI summary yet. Choose Generate AI analysis to process available transcript text."}
                   </p>
                 </div>
 
@@ -218,10 +218,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
                     Key Decisions
                   </h4>
                   <ul className="space-y-1">
-                    {(aiData?.keyDecisions || [
-                      "Organized visual presentation layers side-by-side with student grid views",
-                      "Agreed to build direct Excel spreadsheet logging for automated classroom attendance"
-                    ]).map((dec, idx) => (
+                    {(aiData?.keyDecisions || []).map((dec, idx) => (
                       <li key={idx} className="text-xs text-text-dim flex items-start gap-2 bg-panel-2/30 px-3 py-2 rounded-lg border border-border-custom/30">
                         <span className="text-indigo-400 font-extrabold shrink-0">•</span>
                         {dec}
@@ -237,10 +234,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
                     Action Items
                   </h4>
                   <ul className="space-y-1">
-                    {(aiData?.actionItems || [
-                      "Create sandbox Python/Node interpreter compilers inside coding modules",
-                      "Ensure laser pointers and screen draw features work in whiteboard grids"
-                    ]).map((act, idx) => (
+                    {(aiData?.actionItems || []).map((act, idx) => (
                       <li key={idx} className="text-xs text-text-dim flex items-start gap-2 bg-panel-2/30 px-3 py-2 rounded-lg border border-border-custom/30">
                         <input type="checkbox" className="rounded text-teal-500 border-border-custom mt-0.5" />
                         <span>{act}</span>
@@ -257,10 +251,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
                       Detected Questions
                     </h5>
                     <div className="space-y-1.5">
-                      {(aiData?.questions || [
-                        "Can teachers freeze active whiteboard frames?",
-                        "How do students bookmarks chapter highlights?"
-                      ]).map((q, idx) => (
+                      {(aiData?.questions || []).map((q, idx) => (
                         <div key={idx} className="text-[11px] text-text-dim bg-[#181a1f] p-2 rounded-lg border border-border-custom/40">
                           {q}
                         </div>
@@ -274,10 +265,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
                       Detected Tasks
                     </h5>
                     <div className="space-y-1.5">
-                      {(aiData?.tasks || [
-                        "Compile active speech-to-text transcript lists",
-                        "Configure classroom attendee active metrics"
-                      ]).map((t, idx) => (
+                      {(aiData?.tasks || []).map((t, idx) => (
                         <div key={idx} className="text-[11px] text-text-dim bg-[#181a1f] p-2 rounded-lg border border-border-custom/40">
                           {t}
                         </div>
@@ -293,10 +281,7 @@ export default function AIWidget({ transcriptLines, bookmarks, onAddBookmark, ro
                     Meeting Timeline
                   </h4>
                   <div className="relative border-l-2 border-border-custom pl-4 ml-2 space-y-4">
-                    {(aiData?.timeline || [
-                      { timestamp: "00:01", title: "Welcome & Setup", description: "Host initiated the PeerJS WebRTC room and connected pre-flight grids." },
-                      { timestamp: "00:12", title: "Whiteboard Drawing", description: "Teacher began illustrating system architectures on collaborative whiteboards." }
-                    ]).map((time, idx) => (
+                    {(aiData?.timeline || []).map((time, idx) => (
                       <div key={idx} className="relative">
                         <span className="absolute -left-[23px] top-1 w-2.5 h-2.5 rounded-full bg-accent border-2 border-panel shadow" />
                         <div className="flex items-center gap-2">
