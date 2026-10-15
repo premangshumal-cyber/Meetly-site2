@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { runJavaScriptSafely } from '../sandboxRunner';
 import { 
   Code, 
   Terminal, 
@@ -65,28 +66,20 @@ export default function CodingInterviewWidget({ onUpdateCode, code }: CodingInte
   }, [language]);
 
   const handleRunCode = async () => {
+    if (language !== 'javascript') {
+      setTerminalLogs(`${language === 'python' ? 'Python' : 'C++'} compilation requires a separately isolated compiler service. Meetly does not pretend to run this language; JavaScript runs locally in a secure browser sandbox.`);
+      return;
+    }
+    if (!code.trim()) {
+      setTerminalLogs('Enter JavaScript code before pressing Run.');
+      return;
+    }
     setCompiling(true);
-    setTerminalLogs('Compiling streams... requesting server resources...');
-
+    setTerminalLogs('Running JavaScript in an isolated browser sandbox...');
     try {
-      const response = await fetch('/api/compile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, language })
-      });
-
-      if (!response.ok) {
-        throw new Error('Server compilation error');
-      }
-
-      const data = await response.json();
-      if (data.error) {
-        setTerminalLogs(`⚠️ Compile Error:\n${data.error}`);
-      } else {
-        setTerminalLogs(data.output);
-      }
-    } catch (err: any) {
-      setTerminalLogs(`⚠️ Execution failed:\n${err?.message || 'Server connection timed out'}`);
+      setTerminalLogs(await runJavaScriptSafely(code));
+    } catch (error: any) {
+      setTerminalLogs(`Execution unavailable: ${String(error?.message || error)}`);
     } finally {
       setCompiling(false);
     }
